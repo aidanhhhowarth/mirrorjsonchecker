@@ -1,5 +1,5 @@
 {
-  "$schema": "./mirrors.schema.json",
+  "$schema": "mirrors.schema.json",
   "torrents": [
     {
       "url": "https://linuxmint.com/torrents/",
