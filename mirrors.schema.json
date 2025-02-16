@@ -126,7 +126,7 @@
             "color": {
               "type": "string",
               "description": "Color this repo is represented as on the Map",
-              "pattern": "#[0-9a-f]{6}"
+              "pattern": "^#[0-9a-f]{6}$"
             },
             "publicRsync": {
               "type": "boolean",
