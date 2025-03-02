@@ -3,26 +3,33 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.json.JsonMapper;
 import com.networknt.schema.*;
 
+import org.zeromq.SocketType;
+import org.zeromq.ZContext;
+import org.zeromq.ZMQ;
+
 import java.io.File;
 import java.io.IOException;
+import java.nio.file.*;
 import java.util.Set;
+import java.util.concurrent.TimeUnit;
 
 public class MirrorJsonValidator {
 
 	private static final JsonSchema SCHEMA = JsonSchemaFactory.getInstance(SpecVersion.VersionFlag.V7)
-			.getSchema(new File("mirrors.schema.json").getAbsoluteFile().toURI());
+			.getSchema(new File("config/mirrors.schema.json").getAbsoluteFile().toURI());
+	private static final Path CONFIG_PATH = Paths.get("config");
+	private static final File MIRRORS_JSON = new File(CONFIG_PATH + "/mirrors.json");
 
 	/**
 	 * Validates mirrors.json against mirrors.schema.json.
 	 *
-	 * @param mirrorsJson the mirrors.json file to be validated
 	 * @return true if mirrorsJson is a valid json matching schema, false otherwise
 	 */
-	public static boolean ValidateMirrorJson(File mirrorsJson) {
+	private static boolean ValidateMirrorJson() {
 
 		JsonNode mirrorsJsonNode;
 		try {
-			mirrorsJsonNode = new JsonMapper().readTree(mirrorsJson);
+			mirrorsJsonNode = new JsonMapper().readTree(MIRRORS_JSON);
 		} catch (JsonParseException e) {
 			System.out.println("mirrors.json contains invalid json");
 			return false;
@@ -40,5 +47,51 @@ public class MirrorJsonValidator {
 			System.out.println(errors);
 			return false;
 		}
+	}
+
+	public static void main(String[] args) {
+
+		WatchService watcher;
+		try {
+			watcher = FileSystems.getDefault().newWatchService();
+			CONFIG_PATH.register(watcher, StandardWatchEventKinds.ENTRY_MODIFY);
+		} catch (IOException e) {
+			throw new RuntimeException(e);
+		}
+
+		WatchKey key;
+		while(true) {
+			try {
+				key = watcher.take(); // Wait for file to be changed
+			} catch (InterruptedException e) {
+				throw new RuntimeException(e);
+			}
+
+			try {
+				TimeUnit.MILLISECONDS.sleep(50); // Prevents duplicate events (from updating metadata)
+			} catch (InterruptedException e) {
+				throw new RuntimeException(e);
+			}
+			key.pollEvents();
+			key.reset();
+
+			if (ValidateMirrorJson()) { // Only send if valid
+				try {
+					SendZMQ(Files.readString(MIRRORS_JSON.toPath()));
+				} catch (IOException e) {
+					throw new RuntimeException(e);
+				}
+			}
+		}
+	}
+
+	private static final ZMQ.Socket SOCKET = new ZContext().createSocket(SocketType.PUB);
+	static {
+		SOCKET.bind("tcp://*:27887");
+	}
+
+	private static void SendZMQ(String mirrorsJson) {
+		SOCKET.sendMore("Config");
+		SOCKET.send(mirrorsJson.getBytes(ZMQ.CHARSET));
 	}
 }
